@@ -895,13 +895,23 @@ class LaneDetectorSensor(object):
         weak_self = weakref.ref(self)
 
     # Apply color threshold
-    def color_threshold(self, image, thresh=(140, 255)):
+    def color_threshold(self, image):
         # Convert to hls
-        image_hls = cv2.cvtColor(image, cv2.COLOR_BGR2HLS)
+        image_hls = cv2.cvtColor(image, cv2.COLOR_RGB2HLS)
         # Get saturation
         img_sat = image_hls[:,:,1]
         # Threshold using inRange
-        s_binary = cv2.inRange(img_sat, thresh[0], thresh[1])
+        maximum = max(img_sat.flatten())
+        minimum = lambda x: (x-60) if (x-60) > 0 else 0
+        #minimum = min(img_sat.flatten())
+        m = minimum(maximum)
+        #print("flat: ", img_sat.flatten())
+        #print("maximum: ",maximum)
+        #print("minimum: ",int(m))
+        #thresh = ((maximum/2), maximum)
+        s_binary = cv2.inRange(img_sat, int(m), int(maximum))
+        plt.figure(figsize=(10,10))
+        plt.imsave('color_thresh.jpg', s_binary, cmap='gray')
         return s_binary
 
     def warp(self, img):
@@ -928,7 +938,7 @@ class LaneDetectorSensor(object):
         return binary_warped, Minv
 
     def get_histogram(self, binary_warped):
-        binary_warped = binary_warped[131:260, 0:930]
+        binary_warped = binary_warped[145:290, 0:930]
         histogram = np.sum(binary_warped[binary_warped.shape[0] // 2:, :], axis=0)
         return histogram
 
@@ -946,7 +956,7 @@ class LaneDetectorSensor(object):
         pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
         pts = np.hstack((pts_left, pts_right))
 
-        cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
+        cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
 
         newwarp = cv2.warpPerspective(color_warp, Minv, (original_image.shape[1], original_image.shape[0]))
         result = cv2.addWeighted(original_image, 1, newwarp, 0.3, 0)
@@ -1048,45 +1058,11 @@ class LaneDetectorSensor(object):
 
         return ret
 
-    def measure_curvature(self, lines_info):
-        # Approximate meters per pixels
-        ym_per_pix = 30/(260)
-        xm_per_pix = 3.7/(650)
-
-        # Get polynom points
-        leftx = lines_info['left_fitx']
-        rightx = lines_info['right_fitx']
-
-        # Reverse order
-        leftx = leftx[::-1]
-        rightx = rightx[::-1]
-
-        ploty = lines_info['ploty']
-
-        # Compute corvature
-        y_eval = np.max(ploty)
-        left_fit_cr = np.polyfit(ploty*ym_per_pix, leftx*xm_per_pix, 2)
-        right_fit_cr = np.polyfit(ploty*ym_per_pix, rightx*xm_per_pix, 2)
-        left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
-        right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
-
-        return left_curverad, right_curverad
-
-    def sanity(self, ret, left_curverad, right_curverad):
-        # Sanity check: whether the lines are roughly parallel and have similar curvature
-        slope_left = ret['left_fitx'][0] - ret['left_fitx'][-1]
-        slope_right = ret['right_fitx'][0] - ret['right_fitx'][-1]
-        slope_diff = abs(slope_left - slope_right)
-        slope_threshold = 150
-        curve_diff = abs(left_curverad - right_curverad)
-        curve_threshold = 10000
-
-        return (slope_diff < slope_threshold and curve_diff < curve_threshold)
 
 
     def process_image(self, image):
 
-        roi = image[400:710, 220:1150]
+        roi = image[420:710, 220:1150]
         #print('shape of image', image.shape)
         #print('shape of roi', roi.shape)
         # Thresholding
@@ -1101,19 +1077,10 @@ class LaneDetectorSensor(object):
         # Sliding Window to detect lane lines
         ret = self.slide_window(binary_warped, histogram)
 
-        # Measuring Curvature
-        left_curverad, right_curverad = self.measure_curvature(ret)
-
-        # Sanity check
-        #if not self.sanity(ret,left_curverad,right_curverad):
-            # Use last good images if sanity check fails
-            #binary_warped = self.used_warped
-            #ret = self.used_ret
-
         result = image
 
         # Visualizing Lane Lines Info
-        result[400:710, 220:1150] = self.draw_lane_lines(roi, binary_warped, Minv, ret)
+        result[420:710, 220:1150] = self.draw_lane_lines(roi, binary_warped, Minv, ret)
 
         # Compute deviation
         deviation_pixels = image.shape[1]/2 - abs(ret['right_fitx'][-1] - ret['left_fitx'][-1])
@@ -1124,7 +1091,7 @@ class LaneDetectorSensor(object):
         #self.used_warped = binary_warped
         #self.used_ret = ret
 
-        return result, deviation, left_curverad
+        return result, deviation
 # ==============================================================================
 # -- CameraManager -------------------------------------------------------------
 # ==============================================================================
@@ -1239,8 +1206,8 @@ class CameraManager(object):
             # hugh
             #lines = cv2.HoughLinesP(thresh, 1, np.pi/180, 30, maxLineGap = 200)
             ld = LaneDetectorSensor(self._parent, self.hud)
-            final_image, dev, curv = ld.process_image(img)
-            
+            final_image, dev= ld.process_image(img)
+            final_image = cv2.cvtColor(final_image, cv2.COLOR_BGR2RGB)
             #towrite 
             #dmy = img.copy()
             #or with canny 
