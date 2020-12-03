@@ -149,7 +149,10 @@ def get_actor_display_name(actor, truncate=250):
     name = ' '.join(actor.type_id.replace('_', '.').title().split('.')[1:])
     return (name[:truncate - 1] + u'\u2026') if len(name) > truncate else name
 
-
+# ==============================================================================
+# -- My beautiful global car center offset variable  ---------------------------
+# ==============================================================================
+cco = 0 
 # ==============================================================================
 # -- World ---------------------------------------------------------------------
 # ==============================================================================
@@ -445,6 +448,20 @@ class KeyboardControl(object):
             self._control.brake = 0
 
         steer_increment = 5e-4 * milliseconds
+
+        if cco < 0:
+            #if keys[K_LEFT] or keys[K_a]:
+            if self._steer_cache > 0:
+                self._steer_cache = 0
+            else:
+                self._steer_cache -= 0.7
+        else:
+        #elif keys[K_RIGHT] or keys[K_d]:
+            if self._steer_cache < 0:
+                self._steer_cache = 0
+            else:
+                self._steer_cache += 0.7
+
         if keys[K_LEFT] or keys[K_a]:
             if self._steer_cache > 0:
                 self._steer_cache = 0
@@ -524,10 +541,6 @@ class HUD(object):
         heading += 'S' if 90.5 < compass < 269.5 else ''
         heading += 'E' if 0.5 < compass < 179.5 else ''
         heading += 'W' if 180.5 < compass < 359.5 else ''
-        colhist = world.collision_sensor.get_collision_history()
-        collision = [colhist[x + self.frame - 200] for x in range(0, 200)]
-        max_col = max(1.0, max(collision))
-        collision = [x / max_col for x in collision]
         vehicles = world.world.get_actors().filter('vehicle.*')
         self._info_text = [
             'Server:  % 16.0f FPS' % self.server_fps,
@@ -561,7 +574,6 @@ class HUD(object):
         self._info_text += [
             '',
             'Collision:',
-            collision,
             '',
             'Number of vehicles: % 8d' % len(vehicles)]
         if len(vehicles) > 1:
@@ -698,7 +710,6 @@ class CollisionSensor(object):
         # We need to pass the lambda a weak reference to self to avoid circular
         # reference.
         weak_self = weakref.ref(self)
-        self.sensor.listen(lambda event: CollisionSensor._on_collision(weak_self, event))
 
     def get_collision_history(self):
         history = collections.defaultdict(int)
@@ -910,8 +921,8 @@ class LaneDetectorSensor(object):
         #print("minimum: ",int(m))
         #thresh = ((maximum/2), maximum)
         s_binary = cv2.inRange(img_sat, int(m), int(maximum))
-        plt.figure(figsize=(10,10))
-        plt.imsave('color_thresh.jpg', s_binary, cmap='gray')
+        #plt.figure(figsize=(10,10))
+        #plt.imsave('color_thresh.jpg', s_binary, cmap='gray')
         return s_binary
 
     def warp(self, img):
@@ -957,12 +968,11 @@ class LaneDetectorSensor(object):
         pts = np.hstack((pts_left, pts_right))
 
         cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
-
         newwarp = cv2.warpPerspective(color_warp, Minv, (original_image.shape[1], original_image.shape[0]))
         result = cv2.addWeighted(original_image, 1, newwarp, 0.3, 0)
 
         return result
-
+    
     def slide_window(self, binary_warped, histogram):
 
         # Get line bases
@@ -1025,6 +1035,19 @@ class LaneDetectorSensor(object):
         # Fit second orde polynoms
         left_fit = np.polyfit(lefty, leftx, 2)
         right_fit = np.polyfit(righty, rightx, 2)
+        y_eval= 720
+        ym_per_pix = 30/720 
+        xm_per_pix = 3.7/700
+        left_fit_cr = left_fit
+        right_fit_cr = right_fit
+        left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
+
+        right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
+        car_pos = int(1280/2) 
+        left_lane_bottom_x = left_fit_cr[0]*1280**2 + left_fit_cr[1]*1280 + left_fit_cr[2]
+        right_lane_bottom_x = right_fit_cr[0]*1280**2 + right_fit_cr[1]*1280 + right_fit_cr[2]
+        lane_center_position = ((right_lane_bottom_x - left_lane_bottom_x) / 2) + left_lane_bottom_x
+        car_center_offset = np.abs(car_pos - lane_center_position) * xm_per_pix
 
         # Get points that fit on the polynoms
         left_lane_inds = ((nonzerox > (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy +
@@ -1055,6 +1078,8 @@ class LaneDetectorSensor(object):
         ret['left_fitx'] = left_fitx
         ret['right_fitx'] = right_fitx
         ret['ploty'] = ploty
+        cco = car_center_offset
+        print(cco)
 
         return ret
 
