@@ -149,6 +149,10 @@ def get_actor_display_name(actor, truncate=250):
     name = ' '.join(actor.type_id.replace('_', '.').title().split('.')[1:])
     return (name[:truncate - 1] + u'\u2026') if len(name) > truncate else name
 
+# ==============================================================================
+# -- My beautiful global car center offset variable  ---------------------------
+# ==============================================================================
+cco = 0
 
 # ==============================================================================
 # -- World ---------------------------------------------------------------------
@@ -445,6 +449,22 @@ class KeyboardControl(object):
             self._control.brake = 0
 
         steer_increment = 5e-4 * milliseconds
+
+        if cco < 0:
+            #if keys[K_LEFT] or keys[K_a]:
+            if self._steer_cache > 0:
+                self._steer_cache = 0
+            else:
+                self._steer_cache -= 1
+        elif cco > 0:
+        #elif keys[K_RIGHT] or keys[K_d]:
+            if self._steer_cache < 0:
+                self._steer_cache = 0
+            else:
+                self._steer_cache += 1
+        else:
+            self._steer_cache = 0
+
         if keys[K_LEFT] or keys[K_a]:
             if self._steer_cache > 0:
                 self._steer_cache = 0
@@ -524,10 +544,7 @@ class HUD(object):
         heading += 'S' if 90.5 < compass < 269.5 else ''
         heading += 'E' if 0.5 < compass < 179.5 else ''
         heading += 'W' if 180.5 < compass < 359.5 else ''
-        colhist = world.collision_sensor.get_collision_history()
-        collision = [colhist[x + self.frame - 200] for x in range(0, 200)]
-        max_col = max(1.0, max(collision))
-        collision = [x / max_col for x in collision]
+
         vehicles = world.world.get_actors().filter('vehicle.*')
         self._info_text = [
             'Server:  % 16.0f FPS' % self.server_fps,
@@ -561,7 +578,6 @@ class HUD(object):
         self._info_text += [
             '',
             'Collision:',
-            collision,
             '',
             'Number of vehicles: % 8d' % len(vehicles)]
         if len(vehicles) > 1:
@@ -698,7 +714,6 @@ class CollisionSensor(object):
         # We need to pass the lambda a weak reference to self to avoid circular
         # reference.
         weak_self = weakref.ref(self)
-        self.sensor.listen(lambda event: CollisionSensor._on_collision(weak_self, event))
 
     def get_collision_history(self):
         history = collections.defaultdict(int)
@@ -902,7 +917,7 @@ class LaneDetectorSensor(object):
         img_sat = image_hls[:,:,1]
         # Threshold using inRange
         maximum = max(img_sat.flatten())
-        minimum = lambda x: (x-60) if (x-60) > 0 else 0
+        minimum = lambda x: (x-50) if (x-50) > 0 else 0
         #minimum = min(img_sat.flatten())
         m = minimum(maximum)
         #print("flat: ", img_sat.flatten())
@@ -930,6 +945,8 @@ class LaneDetectorSensor(object):
              [150, 260],
              [800, 0]])
 
+
+
         # Get perspective transforms
         M = cv2.getPerspectiveTransform(src, dst)
         Minv = cv2.getPerspectiveTransform(dst, src)
@@ -942,39 +959,42 @@ class LaneDetectorSensor(object):
         histogram = np.sum(binary_warped[binary_warped.shape[0] // 2:, :], axis=0)
         return histogram
 
+    def get_uphistogram(self, binary_warped):
+        binary_warped = binary_warped[0:145, 0:930]
+        histogram = np.sum(binary_warped[binary_warped.shape[0] // 2:, :], axis=0)
+        return histogram
+
     def draw_lane_lines(self, original_image, warped_image,  histogram, Minv):
-        #leftx = draw_info['leftx']
-        #rightx = draw_info['rightx']
-        #left_fitx = draw_info['left_fitx']
-        #right_fitx = draw_info['right_fitx']
-        #ploty = draw_info['ploty']
 
         # Get line bases
         midpoint = np.int(histogram.shape[0] / 2)
-        leftx_base = np.argmax(histogram[:midpoint])
-        rightx_base = np.argmax(histogram[midpoint:]) + midpoint
+        leftx_base = np.argmax(histogram[:midpoint]) - 100
+        rightx_base = np.argmax(histogram[midpoint:]) + midpoint + 100
 
-        # Get nonzero pixels
-        nonzero = warped_image.nonzero()
-        nonzeroy = np.array(nonzero[0])
-        nonzerox = np.array(nonzero[1])
+
+        uphistogram = self.get_uphistogram(warped_image)
+
+        upmidpoint = np.int(uphistogram.shape[0] / 2)
+        upleftx_base = np.argmax(uphistogram[:upmidpoint])
+        uprightx_base = np.argmax(uphistogram[upmidpoint:]) + upmidpoint
 
         warp_zero = np.zeros_like(warped_image).astype(np.uint8)
 
+        if int(upleftx_base) > int(leftx_base):
+            cco = 1
+        elif int(uprightx_base) < int(rightx_base):
+            cco = -1
+        else:
+            cco = 0
+
+        #a pts a binary képnek azon kivágása, ami a base értékek által megszabott sávon bellül van
         pts = np.zeros_like(warped_image)
-        #for i in range(int(leftx_base), int(rightx_base)):
-        #   pts[nonzeroy[i], nonzerox[i]] = warped_image[nonzeroy[i], nonzerox[i]]
         pts[:, int(leftx_base):int(rightx_base)] = warped_image[:, int(leftx_base):int(rightx_base)]
 
         #plt.figure(figsize=(10,10))
-        #plt.imsave('pts.jpg', pts, cmap='gray')
+        #plt.imsave('warped.jpg', warped_image, cmap='gray')
+
         color_warp = np.dstack((warp_zero, pts, warp_zero))
-
-        #pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
-        #pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
-        #pts = np.hstack((pts_left, pts_right))
-
-        #cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
 
         newwarp = cv2.warpPerspective(color_warp, Minv, (original_image.shape[1], original_image.shape[0]))
         result = cv2.addWeighted(original_image, 1, newwarp, 0.3, 0)
@@ -986,9 +1006,7 @@ class LaneDetectorSensor(object):
 
     def process_image(self, image):
 
-        roi = image[430:710, 220:1150]
-        #print('shape of image', image.shape)
-        #print('shape of roi', roi.shape)
+        roi = image[420:710, 200:1170]
         # Thresholding
         binary = self.color_threshold(roi)
 
@@ -1001,18 +1019,9 @@ class LaneDetectorSensor(object):
         result = image
 
         # Visualizing Lane Lines Info
-        result[430:710, 220:1150] = self.draw_lane_lines(roi, binary_warped, histogram, Minv)
+        result[420:710, 200:1170] = self.draw_lane_lines(roi, binary_warped, histogram, Minv)
 
-        # Compute deviation
-        #deviation_pixels = image.shape[1]/2 - abs(ret['right_fitx'][-1] - ret['left_fitx'][-1])
-        #xm_per_pix = 3.7/(650)
-        #deviation = deviation_pixels * xm_per_pix
-
-        # update last good images
-        #self.used_warped = binary_warped
-        #self.used_ret = ret
-
-        return result#, deviation
+        return result
 # ==============================================================================
 # -- CameraManager -------------------------------------------------------------
 # ==============================================================================
@@ -1107,35 +1116,11 @@ class CameraManager(object):
             array = array[:, :, ::-1]
             # read image 
             img = cv2.cvtColor(array, cv2.COLOR_BGR2RGB)
-            # create framemask
-            #stencil = np.zeros_like(img[:,:,0])
-            #xl1 = 256
-            #xh1 = 630
-            #xh2 = 650
-            #xl2 = 1024
-            #yl = 720
-            #yh = 350
-            #polygon = np.array([[xl1,yl], [xh1,yh], [xh2,yh], [xl2,yl]])
-            #cv2.fillConvexPoly(stencil,polygon,1)
-            #masked = cv2.bitwise_and(img[:,:,0], img[:,:,0], mask=stencil)
-            #plt.figure(figsize=(10,10))
-            #plt.imsave('and.jpg', img)
-            #exit(1)
 
-            # image th + hugh
-            #ret, thresh = cv2.threshold(masked, 120,150, cv2.THRESH_BINARY)
-            # hugh
-            #lines = cv2.HoughLinesP(thresh, 1, np.pi/180, 30, maxLineGap = 200)
             ld = LaneDetectorSensor(self._parent, self.hud)
             final_image = ld.process_image(img)
             final_image = cv2.cvtColor(final_image, cv2.COLOR_BGR2RGB)
-            #towrite 
-            #dmy = img.copy()
-            #or with canny 
-            #if lines is not None:
-            #    for line in lines:
-            #       x1, y1, x2, y2 = line[0]
-            #       cv2.line(dmy, (x1, y1), (x2, y2), (0,250,0), 3)
+
             self.surface = pygame.surfarray.make_surface(final_image.swapaxes(0, 1))
 
         if self.recording:
