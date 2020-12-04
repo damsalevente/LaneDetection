@@ -149,7 +149,7 @@ def get_actor_display_name(actor, truncate=250):
     name = ' '.join(actor.type_id.replace('_', '.').title().split('.')[1:])
     return (name[:truncate - 1] + u'\u2026') if len(name) > truncate else name
 
-
+GLOB_DEV = 0 
 # ==============================================================================
 # -- World ---------------------------------------------------------------------
 # ==============================================================================
@@ -458,6 +458,7 @@ class KeyboardControl(object):
         else:
             self._steer_cache = 0.0
         self._steer_cache = min(0.7, max(-0.7, self._steer_cache))
+        print(GLOB_DEV)
         self._control.steer = round(self._steer_cache, 1)
         self._control.hand_brake = keys[K_SPACE]
 
@@ -1004,15 +1005,16 @@ class LaneDetectorSensor(object):
         result[430:710, 220:1150] = self.draw_lane_lines(roi, binary_warped, histogram, Minv)
 
         # Compute deviation
-        #deviation_pixels = image.shape[1]/2 - abs(ret['right_fitx'][-1] - ret['left_fitx'][-1])
+        deviation_pixels = image.shape[1]/2 - abs(ret['right_fitx'][-1] - ret['left_fitx'][-1])
         #xm_per_pix = 3.7/(650)
-        #deviation = deviation_pixels * xm_per_pix
+        deviation = deviation_pixels * xm_per_pix
+        deviation = GLOB_DEV
 
         # update last good images
         #self.used_warped = binary_warped
         #self.used_ret = ret
 
-        return result#, deviation
+        return result, deviation
 # ==============================================================================
 # -- CameraManager -------------------------------------------------------------
 # ==============================================================================

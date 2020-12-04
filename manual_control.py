@@ -448,32 +448,22 @@ class KeyboardControl(object):
             self._control.brake = 0
 
         steer_increment = 5e-4 * milliseconds
-
-        if cco < 0:
-            #if keys[K_LEFT] or keys[K_a]:
-            if self._steer_cache > 0:
-                self._steer_cache = 0
-            else:
-                self._steer_cache -= 0.7
+        THRESHOLD1 = 10 # px 
+        THRESHOLD2 = -10 #px
+        print(cco)
+        if cco > THRESHOLD1:
+           if self._steer_cache > 0:
+               self._steer_cache = 0
+           else:
+               self._steer_cache -= steer_increment
+        elif cco < THRESHOLD2:
+           if self._steer_cache < 0:
+               self._steer_cache = 0
+           else:
+               self._steer_cache += steer_increment
         else:
-        #elif keys[K_RIGHT] or keys[K_d]:
-            if self._steer_cache < 0:
-                self._steer_cache = 0
-            else:
-                self._steer_cache += 0.7
+           self._steer_cache = 0.0
 
-        if keys[K_LEFT] or keys[K_a]:
-            if self._steer_cache > 0:
-                self._steer_cache = 0
-            else:
-                self._steer_cache -= steer_increment
-        elif keys[K_RIGHT] or keys[K_d]:
-            if self._steer_cache < 0:
-                self._steer_cache = 0
-            else:
-                self._steer_cache += steer_increment
-        else:
-            self._steer_cache = 0.0
         self._steer_cache = min(0.7, max(-0.7, self._steer_cache))
         self._control.steer = round(self._steer_cache, 1)
         self._control.hand_brake = keys[K_SPACE]
@@ -1035,19 +1025,6 @@ class LaneDetectorSensor(object):
         # Fit second orde polynoms
         left_fit = np.polyfit(lefty, leftx, 2)
         right_fit = np.polyfit(righty, rightx, 2)
-        y_eval= 720
-        ym_per_pix = 30/720 
-        xm_per_pix = 3.7/700
-        left_fit_cr = left_fit
-        right_fit_cr = right_fit
-        left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
-
-        right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
-        car_pos = int(1280/2) 
-        left_lane_bottom_x = left_fit_cr[0]*1280**2 + left_fit_cr[1]*1280 + left_fit_cr[2]
-        right_lane_bottom_x = right_fit_cr[0]*1280**2 + right_fit_cr[1]*1280 + right_fit_cr[2]
-        lane_center_position = ((right_lane_bottom_x - left_lane_bottom_x) / 2) + left_lane_bottom_x
-        car_center_offset = np.abs(car_pos - lane_center_position) * xm_per_pix
 
         # Get points that fit on the polynoms
         left_lane_inds = ((nonzerox > (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy +
@@ -1078,8 +1055,6 @@ class LaneDetectorSensor(object):
         ret['left_fitx'] = left_fitx
         ret['right_fitx'] = right_fitx
         ret['ploty'] = ploty
-        cco = car_center_offset
-        print(cco)
 
         return ret
 
@@ -1098,7 +1073,13 @@ class LaneDetectorSensor(object):
 
         # Getting Histogram
         histogram = self.get_histogram(binary_warped)
-
+        threshold = 100
+        print(histogram.shape)
+        leftx = np.argmax(histogram[0:465])
+        rightx = np.argmax(histogram[465:])
+        # one option 
+        cco = leftx - rightx
+        
         # Sliding Window to detect lane lines
         ret = self.slide_window(binary_warped, histogram)
 
@@ -1108,15 +1089,13 @@ class LaneDetectorSensor(object):
         result[420:710, 220:1150] = self.draw_lane_lines(roi, binary_warped, Minv, ret)
 
         # Compute deviation
-        deviation_pixels = image.shape[1]/2 - abs(ret['right_fitx'][-1] - ret['left_fitx'][-1])
-        xm_per_pix = 3.7/(650)
-        deviation = deviation_pixels * xm_per_pix
+        deviation_pixels = 1280/2 - abs(ret['right_fitx'][-1] - ret['left_fitx'][-1])
 
+        #cco = deviation_pixels
         # update last good images
         #self.used_warped = binary_warped
         #self.used_ret = ret
-
-        return result, deviation
+        return result, deviation_pixels
 # ==============================================================================
 # -- CameraManager -------------------------------------------------------------
 # ==============================================================================
@@ -1232,6 +1211,7 @@ class CameraManager(object):
             #lines = cv2.HoughLinesP(thresh, 1, np.pi/180, 30, maxLineGap = 200)
             ld = LaneDetectorSensor(self._parent, self.hud)
             final_image, dev= ld.process_image(img)
+            #print(dev)
             final_image = cv2.cvtColor(final_image, cv2.COLOR_BGR2RGB)
             #towrite 
             #dmy = img.copy()
